@@ -9,6 +9,21 @@ import polars as pl, pyarrow as pa
 seed=int(sys.argv[1]); niter=int(sys.argv[2]); logf=open(sys.argv[3],"a",buffering=1)
 rng=random.Random(seed)
 def log(m): logf.write(f"[seed={seed}] {m}\n"); logf.flush()
+REPRO=sys.argv[4] if len(sys.argv)>4 else None
+if REPRO: os.makedirs(REPRO, exist_ok=True)
+_dc=[0]
+def dump_arr(tag, arr, entry, it):
+    if not REPRO: return
+    _dc[0]+=1
+    try:
+        import pyarrow as _pa
+        a=arr.combine_chunks() if isinstance(arr,_pa.ChunkedArray) else arr
+        t=_pa.table({"x":a})
+        import pyarrow.ipc as _ipc
+        with _pa.OSFile(os.path.join(REPRO,f"{tag}_s{seed}_i{it}_{_dc[0]}.arrow"),"wb") as f:
+            w=_ipc.new_file(f,t.schema); w.write_table(t); w.close()
+        open(os.path.join(REPRO,f"{tag}_s{seed}_i{it}_{_dc[0]}.meta"),"w").write(f"entry={entry} type={arr.type}\n")
+    except Exception as _e: log(f"   dump failed {_e}"); logf.flush()
 def strs(n): 
     pool=["","a","é","x"*9,"y"*13,"z"*40]
     return [None if rng.random()<0.2 else rng.choice(pool) for _ in range(n)]
@@ -73,12 +88,12 @@ for it in range(niter):
             a2=arr.combine_chunks() if isinstance(arr,pa.ChunkedArray) else arr
             s=pl.from_arrow(pa.record_batch({"x":a2}))["x"]
     except pl.exceptions.PanicException as e:
-        log(f"iter {it} IMPORT PANIC entry={entry} type={arr.type}: {str(e)[:180]}"); continue
+        log(f"iter {it} IMPORT PANIC entry={entry} type={arr.type}: {str(e)[:180]}"); dump_arr("IMPORTPANIC", arr, entry, it); continue
     except Exception: continue
     for op in rng.sample([lambda:s.to_list(), lambda:s.to_arrow(), lambda:s.rechunk().to_list(),
                           lambda:s.slice(1,3).to_list(), lambda:pl.Series("y",s.to_arrow()).to_list(),
                           lambda:s.to_frame().to_arrow(), lambda:s.head(3).to_list()], 4):
         try: op()
-        except pl.exceptions.PanicException as e: log(f"iter {it} OP PANIC entry={entry} type={arr.type}: {str(e)[:180]}"); break
+        except pl.exceptions.PanicException as e: log(f"iter {it} OP PANIC entry={entry} type={arr.type}: {str(e)[:180]}"); dump_arr("OPPANIC", arr, entry, it); break
         except Exception: pass
 log("done")

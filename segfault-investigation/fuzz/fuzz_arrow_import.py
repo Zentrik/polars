@@ -11,7 +11,22 @@ import polars as pl, pyarrow as pa, numpy as np
 
 seed=int(sys.argv[1]); niter=int(sys.argv[2]); logf=open(sys.argv[3],"a",buffering=1)
 rng=random.Random(seed)
-def log(m): logf.write(f"[seed={seed}] {m}\n")
+def log(m): logf.write(f"[seed={seed}] {m}\n"); logf.flush()
+REPRO=sys.argv[4] if len(sys.argv)>4 else None
+if REPRO: os.makedirs(REPRO, exist_ok=True)
+_dc=[0]
+def dump_arr(tag, arr, entry, it):
+    if not REPRO: return
+    _dc[0]+=1
+    try:
+        import pyarrow as _pa
+        a=arr.combine_chunks() if isinstance(arr,_pa.ChunkedArray) else arr
+        t=_pa.table({"x":a})
+        import pyarrow.ipc as _ipc
+        with _pa.OSFile(os.path.join(REPRO,f"{tag}_s{seed}_i{it}_{_dc[0]}.arrow"),"wb") as f:
+            w=_ipc.new_file(f,t.schema); w.write_table(t); w.close()
+        open(os.path.join(REPRO,f"{tag}_s{seed}_i{it}_{_dc[0]}.meta"),"w").write(f"entry={entry} type={arr.type}\n")
+    except Exception as _e: log(f"   dump failed {_e}")
 
 def rand_strs(n):
     pool=["","a","é","中","😀","x"*9,"y"*12,"z"*13,"w"*16,"q"*40,"m"*200]
@@ -128,7 +143,7 @@ for it in range(niter):
             ca=arr if isinstance(arr, pa.ChunkedArray) else pa.chunked_array([arr])
             s=pl.Series("x", ca)
     except pl.exceptions.PanicException as e:
-        log(f"iter {it} IMPORT PANIC entry={entry} type={arr.type}: {str(e)[:150]}"); continue
+        log(f"iter {it} IMPORT PANIC entry={entry} type={arr.type}: {str(e)[:150]}"); dump_arr("IMPORTPANIC", arr, entry, it); continue
     except (pl.exceptions.PolarsError, TypeError, ValueError, pa.lib.ArrowException, NotImplementedError) as e:
         continue
     # correctness: round-trip vs pyarrow's own view
@@ -138,10 +153,10 @@ for it in range(niter):
         if got!=exp:
             log(f"iter {it} DATA MISMATCH entry={entry} type={arr.type}: got[:4]={str(got[:4])[:80]} exp[:4]={str(exp[:4])[:80]}")
     except pl.exceptions.PanicException as e:
-        log(f"iter {it} TOLIST PANIC entry={entry} type={arr.type}: {str(e)[:150]}"); continue
+        log(f"iter {it} TOLIST PANIC entry={entry} type={arr.type}: {str(e)[:150]}"); dump_arr("TOLISTPANIC", arr, entry, it); continue
     except Exception: pass
     try:
         exercise(s)
     except pl.exceptions.PanicException as e:
-        log(f"iter {it} EXERCISE PANIC entry={entry} type={arr.type}: {str(e)[:150]}")
+        log(f"iter {it} EXERCISE PANIC entry={entry} type={arr.type}: {str(e)[:150]}"); dump_arr("EXERCISEPANIC", arr, entry, it)
 log("done")

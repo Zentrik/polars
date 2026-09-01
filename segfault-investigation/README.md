@@ -19,11 +19,12 @@ them:
 | **A** | `scan_parquet` + filter on a `Decimal` column silently drops matching rows, and writes corrupt min/max stats that also break pyarrow/other readers | eager + in-memory + streaming | `reproducers/bug_A_decimal_parquet_statistics.py` |
 | **B** | `scan_parquet().filter(...).slice(neg_offset, len)` returns too many rows | streaming only | `reproducers/bug_B_streaming_negative_slice_after_filter.py` |
 | **D** | `pl.col(...).rle()` on the streaming engine panics (`assertion failed: chunks.len() == 1`) whenever the column has >= 5 chunks (natural after reading many files / concat / vstack) | streaming only | `reproducers/bug_D_streaming_rle_multichunk_panic.py` |
+| **E** | filtering an `Int128` column read from Parquet panics (`todo!()` at `statistics.rs:545`; you cannot filter an Int128 parquet column at all) | in-memory + streaming | `reproducers/bug_E_int128_parquet_filter_panic.py` |
 
-Bug **D** was found by building 1.44.1 from source **with debug assertions** and fuzzing
-that (see the debug-build section below); it reproduces on the plain release wheel too,
-since it is a hard `assert!`. It is the first crash found that is genuinely live on
-1.44.1 from a normal operation.
+Bugs **D** and **E** were found by building 1.44.1 from source **with debug assertions**
+and fuzzing that (see the debug-build section below); both reproduce on the plain
+release wheel too, since they are hard `assert!`/`todo!` panics. They are crashes
+genuinely live on 1.44.1 from normal operations.
 
 The sporadic **segfaults** the reporter sees are best explained by already-reported,
 already-fixed memory-safety bugs that are live in 1.37.1 (see "Known crashes"
@@ -90,12 +91,24 @@ library carries 5,323 `unsafe precondition` checks and 432 `slice::from_raw_part
 alignment checks — the exact canaries from #29020 — confirming the assertions compiled
 in.
 
-Fuzzing that build surfaced **Bug D** (streaming `rle()` on a >= 5-chunk column,
-`assert!(chunks.len() == 1)` in `series/builder.rs:168`, reached from the streaming
-run-length-encoding node). It is a real crash on the release wheel, from a common
-pattern, on the latest version — the concrete answer to "find a crash on 1.44.1". The
-hunt for `debug_assert!`-only failures (silent UB in release, i.e. true
-segfaults-in-waiting) continues in `fuzz/` against this build.
+Fuzzing that build surfaced two crashes genuinely live on 1.44.1:
+
+- **Bug D** — streaming `rle()` on a >= 5-chunk column, `assert!(chunks.len() == 1)` in
+  `series/builder.rs:168`, reached from the streaming run-length-encoding node.
+- **Bug E** — filtering an `Int128` parquet column, `todo!("{:?}", other)` at
+  `polars-parquet/src/arrow/read/statistics.rs:545` (the min/max stats deserializer
+  handles `(Decimal, FixedLenByteArray)` but not `(Int128, FixedLenByteArray(16))`);
+  with `use_statistics=False` the read path instead fails to build an i128 series from
+  a `FixedSizeBinary(16)` arrow chunk. DuckDB tracks a related Int128/HugeInt
+  filter regression from their side; it does not appear filed in polars' own tracker.
+
+No `unsafe precondition` / `from_raw_parts` / other memory-safety `debug_assert!`
+failures fired on 1.44.1 across the debug-build fuzzing — the crashes found are
+controlled `assert!`/`todo!` panics, not silent memory corruption. So on 1.44.1 the
+sporadic faults are query-killing panics (which, if they escape onto a streaming
+worker thread, abort the process and look like a hard crash), not the FFI
+memory-corruption SIGSEGVs that dominate 1.37.1. The integer-overflow panics the build
+also flagged are polars' intentional wrapping sums, not bugs.
 
 Reproducer: `reproducers/bug_D_streaming_rle_multichunk_panic.py`. Minimal:
 
