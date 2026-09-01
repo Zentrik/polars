@@ -21,11 +21,66 @@ them:
 
 The sporadic **segfaults** the reporter sees are best explained by already-reported,
 already-fixed memory-safety bugs that are live in 1.37.1 (see "Known crashes"
-below). The most likely culprit for a 1.37.1 conda user is the nested-string Arrow
-FFI corruption (#28626), which is a hard SIGSEGV/SIGABRT on the 1.37.1 conda build
-and is fixed in 1.44. If the workload uses `pl.Series(name, arrow_array)`,
-`pl.from_arrow`, `to_arrow`/`to_pandas` round-trips, deep `merge_sorted`/`concat(how="align")`
-chains, or `join_where`, upgrading to >= 1.44 removes several of them.
+below). The single most likely culprit is the **nested-Arrow FFI corruption
+(#28626)** — `reproducers/bug_C_nested_binary_ffi_segfault_1371.py`. It is a hard
+SIGSEGV on 1.37.1 (wheel and conda build), fixed in 1.44. See the segfault-hunt
+section below for how pervasive it is on 1.37.1 versus 1.44.1.
+
+**Actionable recommendation: upgrade off 1.37.1.** The dedicated segfault hunt
+below could not produce a single crash on 1.44.1 across tens of thousands of
+executions, while 1.37.1 crashes on the large majority of nested/exotic Arrow
+imports.
+
+---
+
+## Segfault hunt: 1.37.1 vs 1.44.1 (follow-up)
+
+The reporter noted the fault rate is *higher on 1.37.1 than on newer versions*, so
+this is a timing/data-dependent memory bug that is largely (for everything found
+here, entirely) fixed by 1.44. To pin it down, seven fuzzing strategies were run on
+both a `1.37.1` and a `1.44.1` wheel:
+
+| Strategy (script in `fuzz/`) | 1.37.1 | 1.44.1 |
+|------------------------------|--------|--------|
+| Arrow-import FFI (`fuzz_arrow_import.py`) — nested list/struct/fsl, sliced, chunked, dictionary | **766 / 880 seeds SIGSEGV** | 0 / 652 |
+| Exotic Arrow FFI (`fuzz_arrow_exotic.py`) — map, run-end-encoded, dict-of-nested, deep nesting | **121 / 121 seeds SIGSEGV** | 0 / 107 |
+| Streaming-vs-in-memory determinism (`fuzz_det3.py`) | streaming "not implemented" panics | 0 |
+| 400-thread executor stress (`highthread.py`, `#27842`) | only a proper rt32 length error | 0 |
+| 12M-row memory pressure (`fuzz_mempressure.py` / `over_stress.py`, `#29020`) | OOM-kill only | OOM-kill only |
+| Random-op / string-view / parquet-differential (phase 1) | FFI segfaults | 0 crashes |
+
+**Conclusion.** On 1.37.1, importing a nested Arrow array (a `list`/`large_list` of
+`binary`/`string`/`dictionary`, a `map`, a run-end-encoded array, or anything nested
+inside them) whose inner values land in the ~9–16 byte inline-vs-heap window of
+Arrow's view layout is a hard SIGSEGV, and this happens for the large majority of
+such shapes. Because it is data-dependent, a production pipeline sees it as a random,
+sporadic crash. **1.44.1 handled every one of these gracefully** — no segfault, no
+panic, no hang, across ~760 fuzz seeds plus the determinism, thread, and
+memory-pressure runs.
+
+A couple of extra 1.37.1-only defects fell out and are worth noting (all fixed in
+1.44): importing a `RunEndEncodedArray` **hangs forever** on 1.37.1 (1.44 raises a
+clean "not supported" error), and several streaming `group_by`/`over` chains panic
+with "not implemented".
+
+The one open segfault that still affects 1.44.1 upstream is **#29020** (streaming
+`.over()` under sustained cgroup memory-reclaim pressure). It could not be triggered
+in this sandbox because reproducing it needs the reporter's exact
+`systemd-run -p MemoryHigh=… -p MemoryMax=…` throttling, not a plain hard limit
+(a hard limit just OOM-kills). If newer-version faults persist for the reporter, run
+`fuzz/fuzz_mempressure.py` and `fuzz/over_stress.py` inside *their* memory-constrained
+environment (where the real reclaim pressure exists) and watch for exit 139/134;
+that is the most likely remaining cause and is already tracked as #29020.
+
+### Bug C — nested-Arrow FFI SIGSEGV on 1.37.1 (reported #28626, fixed 1.44)
+
+`reproducers/bug_C_nested_binary_ffi_segfault_1371.py`. Minimal:
+
+```python
+import pyarrow as pa, polars as pl
+pl.Series("c", pa.array([[b"x" * 13]] * 200, pa.large_list(pa.binary()))).to_list()
+# 1.37.1: SIGSEGV.  1.44.1: fine.
+```
 
 ---
 
