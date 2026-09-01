@@ -141,7 +141,54 @@ crossbeam noise and focused on the polars `async_executor` code.
 
 ## Findings
 
-_Campaigns in progress; this section is filled in as results land._
+### Finding 1 (CONFIRMED, deterministic repro) — process abort when a `collect(background=True)` handle is dropped mid-query
+
+**This is a distinct bug from #27842** (in-memory engine + rayon, not the
+streaming deque), surfaced by the `cancel_async` workload. But it is a real,
+process-killing crash in exactly the "cancel a query while it runs under
+threading" space, and unlike #27842 it reproduces **deterministically in
+<1 second**.
+
+`repro_exitable_abort.py` (200 iters, aborts on iteration 0–1, 3/3 runs):
+
+```
+thread 'polars-1' panicked at crates/polars-lazy/src/frame/exitable.rs:34:33:
+called `Result::unwrap()` on an `Err` value: SendError { .. }
+Rayon: detected unexpected panic; aborting
+Fatal Python error: Aborted            # exit 134 (SIGABRT)
+```
+
+Root cause — `LazyFrame::collect_concurrently` (`exitable.rs`):
+
+```rust
+POOL.spawn_fifo(move || {
+    let result = physical_plan.execute(&mut state);
+    tx.send(result).unwrap();      // <-- panics if the Receiver is already gone
+});
+```
+
+`InProcessQuery` owns the `Receiver`, and its `Drop` sets the cancel token —
+so dropping the handle is a supported, intended operation. But cancellation is
+cooperative and best-effort: if the query finishes (or was already past its
+cancel checkpoints) around the time the handle is dropped, the completing job
+calls `tx.send(result)` into a channel whose receiver no longer exists, gets
+`SendError`, and the `.unwrap()` panics. Because that panic happens on a
+**rayon worker thread**, rayon escalates it to `abort()` — killing the whole
+process, not just the query. Any `collect(background=True)` user who drops or
+`.cancel()`s + releases the handle before the query lands is exposed.
+
+Present in **1.37.1 and current `main`** (verified against the `py-1.37.1` tag).
+All three spawn arms (`spawn_blocking`, `std::thread::spawn`, `POOL.spawn_fifo`
+at lines 21/28/34) have the same `unwrap()`.
+
+**Fix (one line per arm):** ignore the send error — the receiver being gone is
+the normal cancellation outcome, not a bug:
+
+```rust
+let _ = tx.send(result);
+```
+
+### Finding 2 — the #27842 deque underflow itself
 
 <!-- RESULTS_PLACEHOLDER -->
 
