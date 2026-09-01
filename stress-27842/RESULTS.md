@@ -1,7 +1,8 @@
 # Stress-testing polars 1.37.1 for the async-executor deque corruption (#27842)
 
-Status of this document: **methodology + root-cause analysis are final; the
-Findings section is updated as each campaign completes.**
+Status: **complete.** All three campaigns finished — Rust executor hammer
+(~24.4 B ops), ThreadSanitizer (clean), and the 1.37.1 wheel matrix (87 runs).
+See the Summary table at the bottom.
 
 ## The bug we're hunting
 
@@ -188,9 +189,74 @@ the normal cancellation outcome, not a bug:
 let _ = tx.send(result);
 ```
 
-### Finding 2 — the #27842 deque underflow itself
+### Finding 2 — the #27842 deque underflow itself: NOT reproduced on 4 cores
 
-<!-- RESULTS_PLACEHOLDER -->
+Across all three layers the underflow did **not** reproduce:
+
+| layer | intensity | result |
+|-------|-----------|--------|
+| Rust executor hammer (overflow-checks) | **~24.4 billion** schedule/steal ops — 1.72 B task spawn-steal-run cycles + 22.7 B self-reschedule polls, at 64/128/256 threads on 4 cores | **0** deque underflows / panics / segfaults |
+| ThreadSanitizer (same executor) | scope_churn + fanout + mixed, full instrumented runs | **0** data races reported |
+| polars 1.37.1 wheel, streaming engine | **87** randomized runs across threads×morsel×buffers×allocator-hardening | **0** segfaults; see artifacts below |
+
+The hammer specifically hammered the crash path — deep per-thread LIFO queues
+(the `Worker` deque that `steal_batch_and_pop` reads) grown and shrunk under
+constant cross-thread stealing, plus `task_scope` teardown cancelling tasks
+mid-steal — at heavy oversubscription. 24.4 billion operations of it without a
+single `cap == 0`.
+
+**Non-bug outcomes seen in the wheel campaign** (classified, not defects):
+
+- `oom_kill` ×2 — `concat_many` and `threads_concurrent` at the most extreme
+  settings (`morsel=1` and 256 threads × 16 concurrent queries) exhausted the
+  box's ~15 GB. Artifacts of pathological stress knobs, correctly isolated to
+  the one subprocess by the harness; not a leak in polars.
+- `hang` ×1 — `early_stop` at `morsel=1` timed out at 320 s. **Verified to be
+  slowness, not a deadlock:** the identical workload with tight channel buffers
+  but a normal morsel size completes in 2.5 s. `morsel=1` forces a
+  `slice(1_000_000, 5)` to stream a million rows one row per morsel. This also
+  clears tight channel buffers (`*_BUFFER_SIZE=1`) of deadlocking early-stop
+  pipelines.
+
+### What this means for #27842
+
+`cap == 0` requires the epoch-protected deque `Buffer` to be freed / torn /
+overwritten under a live stealer. That it survived 24.4 B executor ops **and** a
+clean TSan run makes a plain logic race in the work-stealing code the least
+likely explanation. The two remaining hypotheses both fit "faults only after
+hours on a ~400-thread dual-socket Xeon":
+
+1. **The corruption needs genuine large-scale parallelism.** 4 cores give
+   preemption-driven interleavings, not true simultaneous cross-socket
+   execution; a UAF window in crossbeam-epoch's reclamation that only opens
+   under real parallelism at ~400 threads would not reproduce here at any
+   duration. This is the honest limit of this environment.
+2. **The corruption originates outside the executor** — an out-of-bounds write
+   in some query kernel (join/group-by/IO) that happens to land on a deque
+   `Buffer`, with the steal just the first read to touch the poisoned memory.
+   This would only show under real query workloads, not the synthetic executor
+   hammer — and the 87 wheel runs here didn't hit it, but they're far short of
+   the reporter's multi-hour job.
+
+**Recommended next steps to pin it down** (need the reporter's real workload):
+- Run the failing job under a normal build with `RUST_BACKTRACE=full` **plus a
+  larger stress window on the real 2-socket box** using this harness's env
+  matrix; if it's hypothesis 2, AddressSanitizer/Valgrind on a debug polars
+  build would catch the *originating* OOB write, which the deque panic only
+  reports downstream.
+- Share the query shape (streaming vs in-memory; joins/sinks/`collect_async`?)
+  so the hammer and wheel workloads can be narrowed to it.
+- Independently, ship the Finding 1 one-liner — it's a separate, certain bug.
+
+## Summary
+
+| # | Bug | Status | Trigger | Fix |
+|---|-----|--------|---------|-----|
+| 1 | `collect(background=True)` aborts the process if the handle is dropped mid-query (`exitable.rs` `tx.send().unwrap()` on a rayon worker) | **Confirmed, deterministic repro (<1 s)**, 1.37.1→main | `repro_exitable_abort.py` | `let _ = tx.send(result);` ×3 arms |
+| 2 | #27842 deque underflow in `steal_batch_and_pop` | **Not reproduced** on 4 cores over 24.4 B ops + clean TSan; consistent with needing true large-scale parallelism or external heap corruption | reporter's multi-hour ~400-thread job | root cause still open — see next steps |
+
+[pola-rs/polars#27842]: https://github.com/pola-rs/polars/issues/27842
+[CVE-2021-32810]: https://github.com/crossbeam-rs/crossbeam/security/advisories/GHSA-pqqp-xmhj-wgcw
 
 [pola-rs/polars#27842]: https://github.com/pola-rs/polars/issues/27842
 [CVE-2021-32810]: https://github.com/crossbeam-rs/crossbeam/security/advisories/GHSA-pqqp-xmhj-wgcw

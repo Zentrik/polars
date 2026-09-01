@@ -1,0 +1,10 @@
+=== TSAN mode=scope_churn threads=32 secs=100 (08:37:42) ===
+DONE ok: iters=1 scopes=8 spawned=24576 completed=20959 in 269.1s (78 tasks/s)
+--- rc=0 ---
+=== TSAN mode=fanout threads=32 secs=100 (08:42:12) ===
+DONE ok: iters=19 scopes=19 spawned=3735552 completed=3735073 in 103.3s (36140 tasks/s)
+--- rc=0 ---
+=== TSAN mode=mixed threads=24 secs=100 (08:43:56) ===
+DONE ok: iters=1 scopes=6 spawned=22338 completed=19346 in 252.2s (77 tasks/s)
+--- rc=0 ---
+=== TSAN RUN COMPLETE ===

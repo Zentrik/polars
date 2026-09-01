@@ -1,0 +1,25 @@
+total iterations: 87
+outcomes: {'ok': 83, 'rust_panic_abort': 1, 'oom_kill': 2, 'hang': 1}
+
+crash-like: 4
+  #0010 rust_panic_abort cancel_async       thr=4 mor=100000 tight=True hard=False seed=63616
+        note: thread 'polars-1' (13990) panicked at crates/polars-lazy/src/frame/exitable.rs:34:33:
+        artifacts: it000010
+  #0025 oom_kill       concat_many        thr=256 mor=1 tight=False hard=True seed=952378
+        note: [ 4525.293835] Memory cgroup out of memory: Killed process 17551 (python) total-vm:18590972kB, anon-rss:11383584kB, file-rss:6520kB, shmem-rss:0kB, UID:0 pgtables:29900kB oom_score_adj:0
+        artifacts: it000025
+  #0036 hang           early_stop         thr=16 mor=1 tight=True hard=False seed=264067
+        artifacts: it000036
+  #0074 oom_kill       threads_concurrent thr=256 mor=100000 tight=False hard=False seed=264444
+        note: [ 6446.237742] Memory cgroup out of memory: Killed process 656 (python) total-vm:20520052kB, anon-rss:13886640kB, file-rss:6476kB, shmem-rss:0kB, UID:0 pgtables:35256kB oom_score_adj:0
+        artifacts: it000074
+
+scenario (crashes/total): cancel_async=1/4, concat_many=1/5, early_stop=1/9, groupby_storm=0/8, interrupt_victim=0/5, join_storm=0/11, mixed_engines=0/3, multiscan_sink=0/11, rapid_tiny=0/1, seq_pipeline=0/15, sort_window=0/7, threads_concurrent=1/8
+
+threads (crashes/total): 16=1/26, 256=2/23, 4=1/15, 64=0/23
+
+morsel (crashes/total): 1=2/21, 100000=2/17, 1024=0/14, 32=0/35
+
+tight (crashes/total): False=2/48, True=2/39
+
+hardened (crashes/total): False=3/40, True=1/47

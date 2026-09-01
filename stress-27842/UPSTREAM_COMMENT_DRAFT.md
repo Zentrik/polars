@@ -8,7 +8,7 @@ machine by substituting heavy oversubscription + event-rate for the ~400-thread
 Xeon. Sharing in case it helps narrow things down.
 
 **TL;DR:** I could **not** reproduce the `deque.rs:65` underflow on 4 cores,
-despite ~{N} billion work-stealing operations against the exact executor code
+despite ~24 billion work-stealing operations against the exact executor code
 plus a clean ThreadSanitizer run. That pushes me toward "the corruption needs
 genuine large-scale parallelism, or it originates outside the executor" rather
 than a plain logic bug in the work-stealing code. I did, however, find a
@@ -34,14 +34,14 @@ release)
    (`mod.rs`/`task.rs`/`park_group.rs`, byte-identical to the `py-1.37.1` tag)
    into a tiny crate on pinned crossbeam-deque 0.8.6, built with
    `overflow-checks = true` so the underflow panics immediately. Drove it at
-   64–256 executor threads on 4 cores (~{M}M schedule/steal ops/sec) with:
+   64–256 executor threads on 4 cores (up to ~10M schedule/steal ops/sec) with:
    deep per-thread LIFO bursts drained by concurrent steals (maximizing buffer
    grow/shrink — the exact crash path), self-rescheduling yield storms, and
-   `task_scope` teardown that cancels tasks mid-steal. **{X} billion steal ops,
+   `task_scope` teardown that cancels tasks mid-steal. **~24 billion scheduling/steal ops (1.7 billion task steal-run cycles),
    zero underflows.**
 2. **ThreadSanitizer** on the same harness (scope_churn / fanout / mixed):
    **no data races reported**, including the cancel-vs-steal teardown path.
-3. **Real 1.37.1 wheel**, streaming engine, {K} randomized runs across
+3. **Real 1.37.1 wheel**, streaming engine, 87 randomized runs across
    thread-count × morsel-size (down to 1) × tight channel buffers × allocator
    hardening (`MALLOC_CHECK_=3`, jemalloc `junk:true`), over
    scan/join/group-by/sort/window/sink/cancel workloads: **no segfault.**
