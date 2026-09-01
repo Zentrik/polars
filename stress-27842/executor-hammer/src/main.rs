@@ -218,10 +218,14 @@ fn mode_foreign(threads: usize, per_thread: usize) {
                     COMPLETED.fetch_add(1, Ordering::Relaxed);
                 });
                 // Randomly cancel some in-flight to exercise cancel-vs-steal.
+                // Drop the handle either way: the scheduler keeps its own ref so
+                // the task still runs to completion, and dropping frees the
+                // task's Arc once done. (Do NOT mem::forget it — that leaks the
+                // Arc of every spawned task and OOMs a long soak.)
                 if n % 7 == 0 {
-                    let _abort = AbortOnDropHandle::new(h);
+                    drop(AbortOnDropHandle::new(h));
                 } else {
-                    std::mem::forget(h);
+                    drop(h);
                 }
                 n += 1;
                 if n % 256 == 0 {
