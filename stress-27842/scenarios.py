@@ -341,30 +341,46 @@ def scen_cancel_async(pl, rng, ctx):
 
 
 def scen_interrupt_victim(pl, rng, ctx):
-    """Runs queries while the harness fires SIGINT at random moments
-    (KeyboardInterrupt-driven query cancellation)."""
-    attempts = 0
-    done = 0
-    while attempts < 40:
-        attempts += 1
+    """Runs streaming queries for a bounded wall-clock while the harness fires
+    SIGINT at random moments, driving KeyboardInterrupt into in-flight collects
+    so the executor cancels tasks mid-steal (try_raise_keyboard_interrupt path).
+
+    Double-nested so a stray SIGINT landing outside a collect can never kill the
+    process: any escaped KeyboardInterrupt is caught and we simply resume."""
+    state = {"attempts": 0, "done": 0, "cancelled": 0}
+    deadline = time.time() + 60
+
+    def inner():
+        while time.time() < deadline:
+            state["attempts"] += 1
+            a = state["attempts"]
+            try:
+                lf = make_lf(pl, max(ctx.rows // 4, 50_000), seed=a)
+                mode = a % 3
+                if mode == 0:
+                    q = lf.group_by("k_hi").agg(pl.sum("v"), pl.n_unique("s"))
+                elif mode == 1:
+                    q = lf.join(lf.select("k_hi", "v").unique(subset="k_hi"), on="k_hi")
+                else:
+                    q = bounded_big_scan(pl, ctx).group_by("k_lo").agg(pl.mean("v"))
+                collect_streaming(q, pl)
+                state["done"] += 1
+            except KeyboardInterrupt:
+                state["cancelled"] += 1
+            except Exception as e:
+                print(f"[interrupt] {type(e).__name__} at {a}", flush=True)
+            if a % 10 == 0:
+                print(f"[interrupt] attempts={a} done={state['done']} "
+                      f"cancelled={state['cancelled']}", flush=True)
+
+    while time.time() < deadline:
         try:
-            lf = make_lf(pl, max(ctx.rows // 4, 50_000), seed=attempts)
-            mode = attempts % 3
-            if mode == 0:
-                q = lf.group_by("k_hi").agg(pl.sum("v"), pl.n_unique("s"))
-            elif mode == 1:
-                q = lf.join(lf.select("k_hi", "v").unique(subset="k_hi"), on="k_hi")
-            else:
-                q = bounded_big_scan(pl, ctx).group_by("k_lo").agg(pl.mean("v"))
-            collect_streaming(q, pl)
-            done += 1
-            if done % 5 == 0:
-                print(f"[interrupt] {done}/{attempts} ok", flush=True)
+            inner()
         except KeyboardInterrupt:
-            print(f"[interrupt] KI at attempt {attempts}", flush=True)
-        except Exception as e:
-            print(f"[interrupt] {type(e).__name__} at attempt {attempts}", flush=True)
-    print(f"[interrupt] finished {done}/{attempts}", flush=True)
+            # SIGINT landed in the machinery between collects; resume.
+            continue
+    print(f"[interrupt] finished attempts={state['attempts']} done={state['done']} "
+          f"cancelled={state['cancelled']}", flush=True)
 
 
 def scen_threads_concurrent(pl, rng, ctx):

@@ -161,6 +161,10 @@ def classify(rc, stderr, timed_out):
             return "abort"
         if sig == signal.SIGKILL:
             return "killed"
+        if sig == signal.SIGINT:
+            # We inject SIGINT ourselves (interrupt_victim); receiving it back is
+            # expected, not a crash. Real crashes there surface as SEGV/ABRT/BUS.
+            return "sigint"
         return f"signal_{sig}"
     if rc == 0:
         return "ok"
@@ -171,11 +175,11 @@ def classify(rc, stderr, timed_out):
 
 def interesting(outcome):
     """Crash-like outcomes worth keeping cores for."""
-    return outcome not in ("ok", "py_error")
+    return outcome not in ("ok", "py_error", "sigint")
 
 
 def keep_dir(outcome):
-    return outcome != "ok"
+    return outcome not in ("ok", "sigint")
 
 
 def note_from_stderr(stderr):

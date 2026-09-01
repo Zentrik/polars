@@ -1,0 +1,30 @@
+[package]
+name = "executor-hammer"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Standalone stress driver for the polars-stream async executor (pola-rs/polars#27842)"
+
+[[bin]]
+name = "executor-hammer"
+path = "src/main.rs"
+
+# Versions pinned to the py-1.37.1 Cargo.lock so the work-stealing / epoch
+# reclamation semantics match the released wheel exactly.
+[dependencies]
+crossbeam-deque = "=0.8.6"
+crossbeam-utils = "=0.8.21"
+parking_lot = "=0.12.5"
+rand = "=0.9.2"
+slotmap = "=1.1.1"
+atomic-waker = "=1.1.2"
+
+# overflow-checks turns the #27842 deque capacity underflow (cap - 1 with
+# cap == 0) into an immediate panic instead of a wild-pointer segfault;
+# debug-assertions enables crossbeam's internal invariant checks too.
+[profile.release]
+overflow-checks = true
+debug-assertions = true
+debug = 1
+
+[workspace]
