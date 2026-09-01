@@ -154,7 +154,8 @@ def op_string(df):
     e = pl.col(c)
     exprs = [e.str.len_bytes(), e.str.len_chars(), e.str.slice(rng.randint(-5,5), rng.choice([None,0,1,3])), e.str.to_uppercase(), e.str.reverse(), e.str.split(rng.choice(["a","","é"])), e.str.replace_all(rng.choice(["a","",".*"]), "ZZ"), e.str.contains(rng.choice(["a","^$","(a"]), strict=False), e.str.extract_all("a+"), e.str.head(rng.randint(-5,5)), e.str.tail(rng.randint(-5,5)), e.str.strip_chars(), e.str.pad_start(rng.randint(0,30)), e.str.zfill(rng.randint(0,30)), e.str.to_integer(strict=False), e.str.json_decode(infer_schema_length=10) if False else e.str.count_matches("a"), e.str.find("a"), e.str.strip_prefix("a"), e.str.encode("hex"), e.str.escape_regex(), e.str.normalize("NFKC"), e.str.replace_many(["a","b"],["xx","y"]), e.str.contains_any(["a","b"]), e.str.extract_groups("(a)(b)?"), e.str.splitn(" ", 3), e.str.split_exact("a", 2), e.str.join("-"), e.str.to_titlecase()]
     k = rng.randint(1,len(exprs))
-    return collect(df.lazy().select([x.alias(f"s{i}") for i,x in enumerate(rng.sample(exprs,k))]))
+    chosen = rng.sample(exprs,k); log(f"  exprs={[str(x) for x in chosen]}")
+    return collect(df.lazy().select([x.alias(f"s{i}") for i,x in enumerate(chosen)]))
 
 def op_list(df):
     cols = [c for c,t in df.schema.items() if isinstance(t, pl.List)]
@@ -163,7 +164,8 @@ def op_list(df):
     inner = df.schema[c].inner
     exprs = [e.list.len(), e.list.first(), e.list.last(), e.list.get(rng.randint(-3,3), null_on_oob=True), e.list.slice(rng.randint(-3,3), rng.choice([None,0,1,2])), e.list.reverse(), e.list.unique(), e.list.head(2), e.list.tail(2), e.list.gather([0,-1], null_on_oob=True), e.list.contains(pl.lit(None)), e.list.explode(), e.list.sample(fraction=0.5, with_replacement=True, seed=1), e.list.shift(1), e.list.drop_nulls(), e.list.concat([e]), e.list.eval(pl.element().first()), e.list.eval(pl.element().rank()), e.list.n_unique(), e.list.set_union(e), e.list.set_difference(e.list.reverse()), e.list.to_struct(), e.list.diff() if inner.is_numeric() else e.list.len(), e.list.sum() if inner.is_numeric() else e.list.min(), e.list.mean() if inner.is_numeric() else e.list.max(), e.list.sort(descending=True, nulls_last=True), e.list.arg_max() if inner.is_numeric() else e.list.arg_min(), e.list.join(",") if inner==pl.String else e.list.len(), e.list.gather_every(2, rng.randint(0,2)), e.list.to_array(2) if False else e.list.count_matches(pl.lit(None)), e.list.filter(pl.element().is_not_null()), e.list.agg(pl.element().first()) if hasattr(e.list,'agg') else e.list.first()]
     k = rng.randint(1,len(exprs))
-    return collect(df.lazy().select([x.alias(f"l{i}") for i,x in enumerate(rng.sample(exprs,k))]))
+    chosen = rng.sample(exprs,k); log(f"  exprs={[str(x) for x in chosen]}")
+    return collect(df.lazy().select([x.alias(f"l{i}") for i,x in enumerate(chosen)]))
 
 def op_array(df):
     cols = [c for c,t in df.schema.items() if isinstance(t, pl.Array)]
@@ -171,7 +173,8 @@ def op_array(df):
     c = rng.choice(cols); e = pl.col(c); inner=df.schema[c].inner
     exprs = [e.arr.len() if hasattr(e.arr,'len') else e.arr.first(), e.arr.first(), e.arr.last(), e.arr.get(rng.randint(-3,3), null_on_oob=True), e.arr.reverse(), e.arr.unique(), e.arr.explode(), e.arr.to_list(), e.arr.contains(pl.lit(None)), e.arr.n_unique(), e.arr.shift(1), e.arr.to_struct(), e.arr.sort(), e.arr.any() if inner==pl.Boolean else e.arr.max(), e.arr.sum() if inner.is_numeric() else e.arr.min(), e.arr.eval(pl.element().rank()) if hasattr(e.arr,'eval') else e.arr.first(), e.arr.agg(pl.element().first()) if hasattr(e.arr,'agg') else e.arr.first(), e.arr.slice(0,1) if hasattr(e.arr,'slice') else e.arr.first()]
     k = rng.randint(1,len(exprs))
-    return collect(df.lazy().select([x.alias(f"a{i}") for i,x in enumerate(rng.sample(exprs,k))]))
+    chosen = rng.sample(exprs,k); log(f"  exprs={[str(x) for x in chosen]}")
+    return collect(df.lazy().select([x.alias(f"a{i}") for i,x in enumerate(chosen)]))
 
 def op_struct(df):
     cols = [c for c,t in df.schema.items() if isinstance(t, pl.Struct)]
@@ -180,7 +183,8 @@ def op_struct(df):
     fields = df.schema[c].fields
     exprs = [e.struct.unnest(), e.struct.field(fields[0].name), e.struct.rename_fields(["z"+f.name for f in fields]), e.struct.json_encode(), e.struct.with_fields(pl.lit(1).alias("new")), e.struct.field("*") if rng.random()<0.5 else e.struct.field(fields[-1].name), e.is_null(), e.rank() if False else e.is_not_null(), e.hash(), e.n_unique(), e.first(), e.reverse(), e.shift(1), e.gather([0]) if df.height>0 else e]
     k = rng.randint(1,len(exprs))
-    return collect(df.lazy().select([x.alias(f"st{i}") if not isinstance(x, pl.Expr) or True else x for i,x in enumerate(rng.sample(exprs,k))]))
+    chosen = rng.sample(exprs,k); log(f"  exprs={[str(x) for x in chosen]}")
+    return collect(df.lazy().select([x.alias(f"st{i}") for i,x in enumerate(chosen)]))
 
 def op_cast(df):
     exprs=[]
@@ -262,7 +266,8 @@ def op_arith(df):
     a = pl.col(rng.choice(nc)); b = pl.col(rng.choice(nc))
     exprs=[a+b, a-b, a*b, a/b, a//b, a%b, a**2, -a, a.abs(), a.log(), a.sqrt(), a.cum_sum(), a.cum_max(), a.diff(), a.pct_change(), a.rolling_sum(rng.randint(1,5)), a.rolling_mean(rng.randint(1,5), min_samples=1), a.rolling_quantile(0.5, window_size=3), a.ewm_mean(alpha=0.5), a.fill_null(strategy=rng.choice(["forward","backward","min","max","mean","zero","one"])), a.interpolate(), a.clip(0,10), a.round(2), a.rank(method=rng.choice(["average","min","max","dense","ordinal","random"])), a.search_sorted(b), a.hist(bin_count=3), a.qcut([0.5]), a.cut([0]), a.mode(), a.value_counts(), a.unique_counts(), a.arg_sort(), a.arg_unique(), a.peak_max(), a.top_k(3), a.bottom_k(3), a.shift(-2, fill_value=1), a.is_in(b), a.is_between(b, b), (a==b).any(), a.approx_n_unique(), a.skew(), a.kurtosis(), a.entropy(), a.product(), a.sum(), a.mean(), a.median(), a.std(), a.var(), a.rolling_std(3), a.rolling_min(3), a.rolling_max(3), a.rolling_median(3), a.rolling_map(lambda s: s.sum(), 3), a.replace_strict({0:1}, default=None), a.replace({0:1}), a.reinterpret(signed=False) if df.schema[nc[0]] in (pl.Int64,pl.UInt64) else a, a.cum_count(), a.n_unique(), a.null_count(), a.reverse(), a.gather_every(2,1), a.sample(fraction=1.5, with_replacement=True, seed=0), a.explode(), a.implode(), a.repeat_by(2), a.rle(), a.rle_id(), a.min_by(b) if hasattr(a,'min_by') else a.min(), a.max_by(b) if hasattr(a,'max_by') else a.max(), a.arg_true() if False else a.sign(), a.bitwise_and(b) if df.schema[nc[0]].is_integer() and df.schema[nc[-1]]==df.schema[nc[0]] else a, a.cos(), a.exp(), a.sinh(), a.degrees(), a.is_nan() if df.schema[nc[0]].is_float() else a.is_finite() if df.schema[nc[0]].is_float() else a]
     k = rng.randint(1,min(8,len(exprs)))
-    return collect(df.lazy().select([x.alias(f"ar{i}") for i,x in enumerate(rng.sample(exprs,k))]))
+    chosen = rng.sample(exprs,k); log(f"  exprs={[str(x) for x in chosen]}")
+    return collect(df.lazy().select([x.alias(f"ar{i}") for i,x in enumerate(chosen)]))
 
 def op_temporal(df):
     cols=[c for c,t in df.schema.items() if t.is_temporal()]
@@ -273,7 +278,8 @@ def op_temporal(df):
     else: exprs=[e.dt.year(), e.dt.month(), e.dt.day(), e.dt.weekday(), e.dt.iso_year(), e.dt.week(), e.dt.ordinal_day(), e.dt.truncate(rng.choice(["1d","1mo","1y","1h","15m","1w","1q","1ns","0ns"])), e.dt.round(rng.choice(["1d","1mo","1h","1w"])), e.dt.offset_by(rng.choice(["1d","1mo","-1y","3h","1q","1y6mo","0d","1wk"] if hasattr(e,'dt') else ["1d"])), e.dt.to_string(rng.choice(["%Y-%m-%d","%c","%s","%f","%j","%G-%V","iso","%+"] )), e.dt.epoch(rng.choice(["ns","us","ms","s","d"])), e.dt.timestamp("ns"), e.dt.month_start(), e.dt.month_end(), e.dt.quarter(), e.dt.is_leap_year(), e.dt.replace(year=2000) if hasattr(e.dt,'replace') else e.dt.year(), e.dt.add_business_days(rng.randint(-10,10)) if hasattr(e.dt,'add_business_days') else e.dt.year(), e.dt.total_days() if False else e.dt.strftime("%A"), e.dt.date() if t!=pl.Date else e.dt.year(), e.dt.time() if t!=pl.Date else e.dt.year(), e.dt.replace_time_zone(rng.choice(["UTC",None,"Asia/Kolkata"])) if t!=pl.Date else e, e.dt.convert_time_zone("Asia/Kathmandu") if (t!=pl.Date and t.time_zone) else e, e.dt.dst_offset() if t!=pl.Date else e, e.dt.base_utc_offset() if t!=pl.Date else e, e.max(), e.min(), e.mean(), e.median(), e.diff(), e.cast(pl.Int64), e.dt.cast_time_unit("ms") if t!=pl.Date else e, e.rolling_max(2), e.sort(), e.rank(), e.dt.century() if hasattr(e.dt,'century') else e, e.dt.days_in_month() if hasattr(e.dt,'days_in_month') else e, e.dt.is_business_day() if hasattr(e.dt,'is_business_day') else e]
     k = rng.randint(1,min(6,len(exprs)))
     try:
-        return collect(df.lazy().select([x.alias(f"t{i}") for i,x in enumerate(rng.sample(exprs,k))]))
+        chosen = rng.sample(exprs,k); log(f"  exprs={[str(x) for x in chosen]}")
+        return collect(df.lazy().select([x.alias(f"t{i}") for i,x in enumerate(chosen)]))
     except pl.exceptions.PolarsError: return df
 
 def op_rolling_groupby(df):
@@ -313,7 +319,8 @@ def op_when(df):
     exprs=[pl.when(pl.col(c).is_null()).then(pl.col(c)).otherwise(pl.col(c).shift(1)).alias("w1"), pl.when(pl.col(c).is_not_null()).then(pl.lit(None)).otherwise(pl.col(c)).alias("w2"), pl.coalesce(pl.col(c), pl.col(c).reverse()).alias("w3"), pl.col(c).fill_null(pl.col(c).first()).alias("w4"), pl.col(c).zip_with(pl.col(c).is_null(), pl.col(c).shift(-1)).alias("w5") if hasattr(pl.Expr,'zip_with') else pl.col(c).alias("w5"), pl.when(pl.col(c).is_null()).then(pl.lit(1)).alias("w6"), pl.col(c).eq_missing(pl.col(c).shift(1)).alias("w7"), pl.col(c).ne_missing(pl.col(c).reverse()).alias("w8"), pl.col(c).is_first_distinct().alias("w9"), pl.col(c).is_last_distinct().alias("w10"), pl.col(c).is_duplicated().alias("w11"), pl.col(c).is_unique().alias("w12"), pl.col(c).unique(maintain_order=True).alias("w13"), pl.col(c).n_unique().alias("w14"), pl.col(c).hash().alias("w15"), pl.col(c).arg_unique().alias("w16"), pl.col(c).drop_nulls().alias("w17"), pl.col(c).null_count().alias("w18"), pl.col(c).slice(rng.randint(-5,5), rng.randint(0,5)).alias("w19"), pl.col(c).head(3).alias("w20"), pl.col(c).tail(3).alias("w21"), pl.col(c).first().alias("w22"), pl.col(c).last().alias("w23"), pl.col(c).shift(rng.randint(-5,5)).alias("w24"), pl.col(c).extend_constant(None, 3).alias("w25"), pl.col(c).reverse().alias("w26"), pl.col(c).sort(nulls_last=True).alias("w27"), pl.col(c).arg_sort(descending=True).alias("w28"), pl.col(c).filter(pl.col(c).is_not_null()).alias("w29"), pl.col(c).gather_every(3).alias("w30"), pl.col(c).explode().alias("w31") if df.schema[c].is_nested() and not isinstance(df.schema[c], pl.Struct) else pl.col(c).implode().alias("w31"), pl.col(c).to_physical().alias("w32"), pl.col(c).cast(pl.String, strict=False).alias("w33") if not df.schema[c].is_nested() else pl.col(c).is_null().alias("w33"), pl.col(c).count().alias("w34"), pl.col(c).len().alias("w35"), pl.col(c).implode().alias("w36"), pl.col(c).min().alias("w37") if not df.schema[c].is_nested() or isinstance(df.schema[c], (pl.List, pl.Array)) else pl.col(c).is_null().alias("w37"), pl.col(c).max().alias("w38") if not df.schema[c].is_nested() or isinstance(df.schema[c], (pl.List, pl.Array)) else pl.col(c).is_null().alias("w38"), pl.col(c).sort_by(pl.col(c).hash()).alias("w39"), pl.col(c).arg_max().alias("w40") if not df.schema[c].is_nested() else pl.col(c).alias("w40"), pl.col(c).arg_min().alias("w41") if not df.schema[c].is_nested() else pl.col(c).alias("w41"), pl.col(c).rank().alias("w42") if not df.schema[c].is_nested() and df.schema[c]!=pl.Null else pl.col(c).alias("w42"), pl.col(c).mode().alias("w43") if not df.schema[c].is_nested() and df.schema[c] != pl.Null else pl.col(c).alias("w43"), pl.col(c).value_counts().alias("w44") if not isinstance(df.schema[c], pl.Struct) else pl.col(c).alias("w44"), pl.col(c).is_in(pl.col(c).reverse().implode()).alias("w45") if not isinstance(df.schema[c], pl.Struct) else pl.col(c).alias("w45"), pl.col(c).repeat_by(2).alias("w46") if not df.schema[c].is_nested() else pl.col(c).alias("w46"), pl.col(c).bottom_k(2).alias("w47") if not df.schema[c].is_nested() and df.schema[c]!=pl.Null else pl.col(c).alias("w47"), pl.col(c).top_k_by(pl.col(c).hash(), 2).alias("w48") if hasattr(pl.Expr, 'top_k_by') else pl.col(c).alias("w48")]
     k = rng.randint(1,min(8,len(exprs)))
     try:
-        return collect(df.lazy().select(rng.sample(exprs,k)))
+        chosen = rng.sample(exprs,k); log(f"  exprs={[str(x) for x in chosen]}")
+        return collect(df.lazy().select(chosen))
     except pl.exceptions.PolarsError: return df
 
 def op_misc(df):

@@ -125,7 +125,8 @@ for it in range(niter):
             log(f"  !!! HEIGHT MISMATCH after write/read: {truth.height} vs {df.height}")
         # random scans
         for k in range(4):
-            lf = pl.scan_parquet(path, parallel=rng.choice(["auto", "columns", "row_groups", "prefiltered", "none"]), low_memory=rng.random()<0.2, use_statistics=rng.random()<0.8, rechunk=rng.random()<0.3)
+            lf_par = rng.choice(["auto", "columns", "row_groups", "prefiltered", "none"]); lf_lm = rng.random()<0.2; lf_us = rng.random()<0.8
+            lf = pl.scan_parquet(path, parallel=lf_par, low_memory=lf_lm, use_statistics=lf_us, rechunk=rng.random()<0.3)
             proj = rng.sample(df.columns, rng.randint(1, len(df.columns))) if rng.random() < 0.7 else None
             pred = rand_pred(df)
             sl = rng.choice([None, (0, 5), (3, 100), (-10, 5), (df.height // 2, 3), (1, None)])
@@ -147,6 +148,12 @@ for it in range(niter):
                 try:
                     if not norm(got).equals(norm(ref)):
                         log(f"    !!! DATA MISMATCH ({writer} writer): got shape={got.shape} ref shape={ref.shape}")
+                        import shutil, json
+                        keep = os.path.splitext(sys.argv[3])[0] + f"_mismatch_{it}_{k}_{engine}.parquet"
+                        shutil.copy(path, keep)
+                        log(f"    saved {keep}; query: proj={proj!r} pred={pred!r} slice={sl!r} scan_kwargs={{'parallel': {lf_par!r}, 'low_memory': {lf_lm!r}, 'use_statistics': {lf_us!r}}}")
+                        log(f"    got head: {got.head(5).to_dicts()}")
+                        log(f"    ref head: {ref.head(5).to_dicts()}")
                 except Exception as ex:
                     log(f"    compare exc {type(ex).__name__}: {str(ex)[:150]}")
         os.remove(path)
