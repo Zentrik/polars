@@ -18,6 +18,12 @@ them:
 |-----|--------------|-----------|------------|
 | **A** | `scan_parquet` + filter on a `Decimal` column silently drops matching rows, and writes corrupt min/max stats that also break pyarrow/other readers | eager + in-memory + streaming | `reproducers/bug_A_decimal_parquet_statistics.py` |
 | **B** | `scan_parquet().filter(...).slice(neg_offset, len)` returns too many rows | streaming only | `reproducers/bug_B_streaming_negative_slice_after_filter.py` |
+| **D** | `pl.col(...).rle()` on the streaming engine panics (`assertion failed: chunks.len() == 1`) whenever the column has >= 5 chunks (natural after reading many files / concat / vstack) | streaming only | `reproducers/bug_D_streaming_rle_multichunk_panic.py` |
+
+Bug **D** was found by building 1.44.1 from source **with debug assertions** and fuzzing
+that (see the debug-build section below); it reproduces on the plain release wheel too,
+since it is a hard `assert!`. It is the first crash found that is genuinely live on
+1.44.1 from a normal operation.
 
 The sporadic **segfaults** the reporter sees are best explained by already-reported,
 already-fixed memory-safety bugs that are live in 1.37.1 (see "Known crashes"
@@ -71,6 +77,34 @@ in this sandbox because reproducing it needs the reporter's exact
 `fuzz/fuzz_mempressure.py` and `fuzz/over_stress.py` inside *their* memory-constrained
 environment (where the real reclaim pressure exists) and watch for exit 139/134;
 that is the most likely remaining cause and is already tracked as #29020.
+
+### Debug-assertions build of 1.44.1 (the right tool)
+
+A plain release wheel has debug-assertions **off**, so latent out-of-bounds /
+invalid-layout bugs corrupt silently and only rarely happen to hit unmapped memory —
+which is why fuzzing the wheel found nothing new on 1.44.1. The fix is to build 1.44.1
+from source with debug-assertions **on** (optimized profile, symbols/LTO off to keep
+it small): the standard-library and polars `debug_assert!` / `assert!` checks then turn
+that latent corruption into a loud panic at the exact point it happens. The built
+library carries 5,323 `unsafe precondition` checks and 432 `slice::from_raw_parts`
+alignment checks — the exact canaries from #29020 — confirming the assertions compiled
+in.
+
+Fuzzing that build surfaced **Bug D** (streaming `rle()` on a >= 5-chunk column,
+`assert!(chunks.len() == 1)` in `series/builder.rs:168`, reached from the streaming
+run-length-encoding node). It is a real crash on the release wheel, from a common
+pattern, on the latest version — the concrete answer to "find a crash on 1.44.1". The
+hunt for `debug_assert!`-only failures (silent UB in release, i.e. true
+segfaults-in-waiting) continues in `fuzz/` against this build.
+
+Reproducer: `reproducers/bug_D_streaming_rle_multichunk_panic.py`. Minimal:
+
+```python
+import polars as pl
+s = pl.concat([pl.Series("p", [i % 3]) for i in range(5)], rechunk=False)  # >= 5 chunks
+pl.DataFrame({"p": s}).lazy().select(pl.col("p").rle()).collect(engine="streaming")
+# 1.44.1: PANIC assertion failed: chunks.len() == 1   (in-memory engine is fine)
+```
 
 ### Bug C — nested-Arrow FFI SIGSEGV on 1.37.1 (reported #28626, fixed 1.44)
 
